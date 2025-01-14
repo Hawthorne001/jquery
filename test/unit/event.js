@@ -2698,7 +2698,6 @@ testIframe(
 		assert.expect( 1 );
 
 		var done = assert.async(),
-			focus = false,
 			input = jQuery( frameDoc ).find( "#frame-input" );
 
 		// Create a focusin handler on the parent; shouldn't affect the iframe's fate
@@ -3113,11 +3112,11 @@ QUnit.test(
 				spy.immediate = sinon.stub( event.originalEvent, "stopImmediatePropagation" );
 				event.stopImmediatePropagation();
 			} )
-			.on( "simulated", function( event ) {
+			.on( "simulated", function() {
 				assert.ok( false, "simulated event immediate propagation stopped" );
 			} );
 		outer
-			.on( "simulated", function( event ) {
+			.on( "simulated", function() {
 				assert.ok( false, "simulated event propagation stopped" );
 			} );
 
@@ -3180,8 +3179,7 @@ QUnit.test( "trigger('click') on radio passes extra params", function( assert ) 
 QUnit.test( "focusout/focusin support", function( assert ) {
 	assert.expect( 6 );
 
-	var focus,
-		parent = jQuery( "<div>" ),
+	var parent = jQuery( "<div>" ),
 		input = jQuery( "<input>" ),
 		inputExternal = jQuery( "<input>" );
 
@@ -3500,6 +3498,64 @@ QUnit.test( "trigger(focus) fires native & jQuery handlers (gh-5015)", function(
 	} );
 
 	input.trigger( "focus" );
+} );
+
+QUnit.test( "duplicate native blur doesn't crash (gh-5459)", function( assert ) {
+	assert.expect( 4 );
+
+	function patchAddEventListener( elem ) {
+		var nativeAddEvent = elem[ 0 ].addEventListener;
+
+		// Support: Firefox 124+
+		// In Firefox, alert displayed just before blurring an element
+		// dispatches the native blur event twice which tripped the jQuery
+		// logic. We cannot call `alert()` in unit tests; simulate the
+		// behavior by overwriting the native `addEventListener` with
+		// a version that calls blur handlers twice.
+		//
+		// Such a simulation allows us to test whether `leverageNative`
+		// logic correctly differentiates between data saved by outer/inner
+		// handlers, so it's useful even without the Firefox bug.
+		elem[ 0 ].addEventListener = function( eventName, handler ) {
+			var finalHandler;
+			if ( eventName === "blur" ) {
+				finalHandler = function wrappedHandler() {
+					handler.apply( this, arguments );
+					return handler.apply( this, arguments );
+				};
+			} else {
+				finalHandler = handler;
+			}
+			return nativeAddEvent.call( this, eventName, finalHandler );
+		};
+	}
+
+	function runTest( handler, message ) {
+		var button = jQuery( "<button></button>" );
+
+		patchAddEventListener( button );
+		button.appendTo( "#qunit-fixture" );
+
+		if ( handler ) {
+			button.on( "blur", handler );
+		}
+		button.on( "focus", function() {
+			button.trigger( "blur" );
+			assert.ok( true, "Did not crash (" + message + ")" );
+		} );
+		button.trigger( "focus" );
+	}
+
+	runTest( undefined, "no prior handler" );
+	runTest( function() {
+		return true;
+	}, "prior handler returning true" );
+	runTest( function() {
+		return { length: 42 };
+	}, "prior handler returning an array-like" );
+	runTest( function() {
+		return { value: 42 };
+	}, "prior handler returning `{ value }`" );
 } );
 
 // TODO replace with an adaptation of
